@@ -1,0 +1,65 @@
+if (dot(
+				pow(
+					(double4)(
+						tickersData[i+0],
+						tickersData[i+1],
+						tickersData[i+2],
+						tickersData[i+3]
+					),
+					(double4)(
+						parms.exponents[0],
+						parms.exponents[1],
+						parms.exponents[2],
+						parms.exponents[3]
+					)
+				),
+				(double4)(
+					parms.multipliers[0],
+					parms.multipliers[1],
+					parms.multipliers[2],
+					parms.multipliers[3]
+				)
+			) + 
+			dot(
+				pow(
+					(double2)(
+						tickersData[i+4],
+						tickersData[i+5]
+					),
+					(double2)(
+						parms.exponents[4],
+						parms.exponents[5]
+					)
+				),
+				(double2)(
+					parms.multipliers[4],
+					parms.multipliers[5]
+				)
+			) >= 0.)
+
+
+
+	if (dot(
+				(double4)(
+					POW(tickersData[i+0], parms.exponents[0]),
+					POW(tickersData[i+1], parms.exponents[1]),
+					POW(tickersData[i+2], parms.exponents[2]),
+					POW(tickersData[i+3], parms.exponents[3])
+				),
+				(double4)(
+					parms.multipliers[0],
+					parms.multipliers[1],
+					parms.multipliers[2],
+					parms.multipliers[3]
+				)
+			) + 
+			dot(
+				(double2)(
+					POW(tickersData[i+4], parms.exponents[4]),
+					POW(tickersData[i+5], parms.exponents[5])
+				),
+				(double2)(
+					parms.multipliers[4],
+					parms.multipliers[5]
+				)
+			) >= 0.) 

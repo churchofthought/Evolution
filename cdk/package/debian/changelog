@@ -1,0 +1,13 @@
+cdk (20120323) unstable; urgency=low
+
+  * bug-report for gmtime/localtime usage.
+  * Fixes for package scripts.
+  * Debian #500161
+
+ -- Thomas E. Dickey <dickey@invisible-island.net>  Sun, 18 Mar 2012 19:38:57 -0400
+
+cdk (20110517) unstable; urgency=high
+
+  * Initial package release
+
+ -- Thomas E. Dickey <dickey@invisible-island.net>  Sat, 14 May 2011 08:15:31 -0400

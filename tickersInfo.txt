@@ -1,0 +1,6 @@
+Number of Tickers:
+1
+Datapoints Per Ticker:
+1173
+Floats Per Datapoint:
+2

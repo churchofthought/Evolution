@@ -1,0 +1,75 @@
+static void generateKernelSourceCode(){
+	sprintf(clKernelSourceCode, 
+		"\x23pragma OPENCL EXTENSION cl_khr_int64_base_atomics : enable\n"
+		"\x23pragma OPENCL EXTENSION cl_khr_int64_extended_atomics : enable\n"
+		MULTI_LINE_STRING(
+
+		typedef struct species_parms{
+			float multipliers[%3$u];
+			int exponents[%4$u];
+		} species_parms;
+
+		typedef struct fitness_result {
+			float fitness;
+			unsigned int parmsIdx;
+		} fitness_result;
+
+		__kernel void fitness(
+			__global const float* tickersData,
+			__global const species_parms* parmsBlock,
+			volatile __global fitness_result* fitnessResult
+		) {
+			__local float fitnesses[%5$u][%1$zu];
+
+			size_t gid0 = get_group_id(0);
+			size_t lid0 = get_local_id(0);
+			size_t lid1 = get_local_id(1);
+
+			const species_parms parms = parmsBlock[%5$u * gid0 + lid0];
+
+			float spent = 0., sold = 0., isHolding = 0.;
+
+			for (unsigned int i = lid1 * %2$u, e = i + %2$u; i < e && tickersData[i]; i += %6$u){
+				if (  parms.multipliers[0]  *  pown((double)tickersData[i+2],  parms.exponents[0])
+					+ parms.multipliers[1]  *  pown((double)tickersData[i+3],  parms.exponents[1])
+					+ parms.multipliers[2]  *  pown((double)tickersData[i+4],  parms.exponents[2])
+					+ parms.multipliers[3]  *  pown((double)tickersData[i+5],  parms.exponents[3])
+					+ parms.multipliers[4]  *  pown((double)tickersData[i+6],  parms.exponents[4])
+					+ parms.multipliers[5]  *  pown((double)tickersData[i+7],  parms.exponents[5])
+					>= 0.){
+					if (!isHolding){
+						spent += (isHolding = tickersData[i+1]);
+					}
+				}else if (isHolding){
+					sold += tickersData[i+1];
+					isHolding = 0.;
+				}
+			}
+			fitnesses[lid0][lid1] = (spent > isHolding) ? sold / (spent - isHolding) : 1.;
+			barrier(CLK_LOCAL_MEM_FENCE);
+			if (lid1 == 0) {
+				float sum = fitnesses[lid0][0];
+				for (unsigned int z = %1$zu; --z;)
+					sum += fitnesses[lid0][z];
+				sum /= %1$zu.;
+				fitness_result curBest = *fitnessResult;
+				if (sum > curBest.fitness){
+					fitness_result newBest = (fitness_result){
+						sum, %5$u * gid0 + lid0
+					};
+					do {
+						ulong old = atom_cmpxchg(
+							(volatile __global ulong*)fitnessResult, 
+							*((ulong*)&curBest), 
+							*((ulong*)&newBest)
+						);
+						if (*((ulong*)&curBest) == *((ulong*)&old)) break;
+
+						curBest = *((fitness_result*)&old);
+					} while(sum > curBest.fitness);
+				}
+			}
+		}
+	), tickersCount, tickerDatapointCount * FLOATS_PER_DATAPOINT, NUM_MULTIPLIERS, NUM_EXPONENTS, localMutationBlockSize, FLOATS_PER_DATAPOINT);
+	file_put_contents(KERNEL_FILE_PATH, clKernelSourceCode);
+}

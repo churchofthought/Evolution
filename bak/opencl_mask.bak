@@ -1,0 +1,23 @@
+// #define ALLSET_IF(x) (0-as_uint(x))
+// #define MASK_FOR_X_Y(x,y) ALLSET_IF(as_uint(x) & as_uint(y))
+// #define MASK_UINT(x,y) (x & as_uint(y))
+// #define MASK_FLOAT(x,y) as_float(x & as_uint(y))
+// price = tickersData[i+1];
+shouldBuy = ( 
+	  parms.multipliers[0]  *  POW((DTYPE)tickersData[i+2],  parms.exponents[0])
+	+ parms.multipliers[1]  *  POW((DTYPE)tickersData[i+3],  parms.exponents[1])
+	+ parms.multipliers[2]  *  POW((DTYPE)tickersData[i+4],  parms.exponents[2])
+	+ parms.multipliers[3]  *  POW((DTYPE)tickersData[i+5],  parms.exponents[3])
+	+ parms.multipliers[4]  *  POW((DTYPE)tickersData[i+6],  parms.exponents[4])
+	+ parms.multipliers[5]  *  POW((DTYPE)tickersData[i+7],  parms.exponents[5])
+>= 0);
+buyMask = MASK_FOR_X_Y(shouldBuy, !isHolding);
+spent += MASK_FLOAT(buyMask, price);
+
+sellMask = MASK_FOR_X_Y(!shouldBuy, isHolding);
+sold += MASK_FLOAT(sellMask, price);
+
+isHolding = as_float(
+	MASK_UINT(buyMask, price) |
+	MASK_UINT(~buyMask & ~sellMask, isHolding)
+);

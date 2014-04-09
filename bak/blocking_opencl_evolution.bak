@@ -1,0 +1,919 @@
+//rm opencl_evolution;sudo killall -9 opencl_evolution;gcc opencl_evolution.c -framework OpenCL -lncurses -Wall -fast -o opencl_evolution; ./opencl_evolution
+//rm opencl_evolution;sudo killall -9 opencl_evolution;gcc opencl_evolution.c -I/opt/AMDAPP/include/ -L/opt/AMDAPP/lib/x86_64/ -lOpenCL -lncurses -lbsd -lm -Wall -Ofast -o opencl_evolution; ./opencl_evolution
+#define VERSION 7777
+
+#include <boost/preprocessor.hpp>
+
+#define REPEAT_TEXT_0(z, n, text) text
+#define REPEAT_TEXT(count,text) BOOST_PP_REPEAT(count, REPEAT_TEXT_0, text)
+
+#define REPEAT_BINARY_TEXT_FROM_TO_0(z, n, dat) BOOST_PP_SEQ_ELEM(0,dat) BOOST_PP_STRINGIZE(n) BOOST_PP_SEQ_ELEM(1,dat)
+#define REPEAT_BINARY_TEXT_FROM_TO(from,to,bef,after) BOOST_PP_REPEAT_FROM_TO(from, to, REPEAT_BINARY_TEXT_FROM_TO_0, (bef)(after))
+
+#include <stdio.h>
+#include <stdlib.h>
+#include <math.h>
+#include <signal.h>
+#include <unistd.h>
+#include <ncurses.h>
+#include <time.h>
+#include <locale.h>
+
+#ifdef __APPLE__
+	#include <mach/mach_time.h>
+#endif
+
+#ifdef __APPLE__
+#include <OpenCL/opencl.h>
+#else
+#include <CL/cl.h>
+#endif
+#include <pthread.h>
+
+void arc4random_buf(void *buf, size_t nbytes);
+
+u_int32_t arc4random_uniform(u_int32_t upper_bound);
+
+
+#ifdef __APPLE__
+	#define MAIN_DEVICE_TYPE CL_DEVICE_TYPE_CPU
+#else
+	#define MAIN_DEVICE_TYPE CL_DEVICE_TYPE_GPU
+#endif
+
+#if MAIN_DEVICE_TYPE == CL_DEVICE_TYPE_GPU
+	#define CL_QUEUE_FLAGS CL_QUEUE_OUT_OF_ORDER_EXEC_MODE_ENABLE
+	#define MAX_WORK_SIZE 256
+	#define GLOBAL_WORK_ITEMS (32*512)
+	#define INITIAL_DEVICE_ID_OFFSET 3
+#else
+	#define CL_QUEUE_FLAGS 0
+	#define MAX_WORK_SIZE 1
+	#define GLOBAL_WORK_ITEMS 1024
+	#define INITIAL_DEVICE_ID_OFFSET 0
+#endif
+
+#define QUEUE_LOAD 2
+
+#define CL_BUILD_OPTIONS "-cl-strict-aliasing"
+/*
+"-cl-fast-relaxed-math -cl-no-signed-zeros " \
+"-cl-mad-enable -cl-strict-aliasing "
+*/
+
+#define SETTINGS_FILE    "Dropbox/opencl_parms.txt"
+#define KERNEL_FILE_PATH "Dropbox/opencl_kernel.cl"
+#define TICKERSINFO_FILE "tickersInfo.txt"
+#define TICKERSDATA_FILE "tickersData.dat"
+
+#define MULTI_LINE_STRING(...) #__VA_ARGS__
+
+#define NUM_MULTIPLIERS 6
+#define NUM_EXPONENTS NUM_MULTIPLIERS
+#define NUM_PARMS BOOST_PP_ADD(NUM_MULTIPLIERS, NUM_EXPONENTS)
+#define FLOATS_PER_DATAPOINT BOOST_PP_ADD(NUM_MULTIPLIERS, 2)
+
+#define RAND() (arc4random())
+#define RANDINT(y) (arc4random_uniform(y))
+
+typedef struct species_parms{
+	float multipliers[NUM_MULTIPLIERS];
+	int exponents[NUM_EXPONENTS];
+} species_parms;
+
+typedef struct fitness_result {
+	float fitness;
+	unsigned int parmsIdx;
+} fitness_result;
+
+typedef struct user_data{
+	species_parms* parmsBlock;
+	cl_mem parmsMem;
+	fitness_result* fitnessResult;
+	cl_kernel clKernel;
+	cl_command_queue clCommandQueue;
+	unsigned int rounds;
+} user_data;
+
+typedef struct device_data{
+	cl_context clContext;
+	cl_program clProgram;
+	cl_command_queue clCommandQueue;
+	cl_kernel clKernel;
+	fitness_result* fitnessResult;
+	cl_mem tickersDataMem;
+	unsigned int deviceNum;
+} device_data;
+
+
+static unsigned int localMutationBlockSize;
+static unsigned int globalMutationBlockSize;
+
+static size_t globalWorkDimensions[1];
+static size_t localWorkDimensions[1];
+// static size_t globalWorkDimensions[2];
+// static size_t localWorkDimensions[2];
+
+static FILE* fSettings;
+static char clKernelSourceCode[5012];
+
+static size_t tickersCount;
+static unsigned int tickerDatapointCount;
+static unsigned int tickersDataSize;
+
+static unsigned int numDevices;
+static device_data* deviceDatas;
+static user_data* userDatas;
+
+
+static float lastWrittenFitness;
+
+
+volatile static species_parms curParms;
+volatile static float curFitness = 0.;
+
+char* clErrorStr(cl_int err) {
+	switch (err) {
+		case CL_SUCCESS:                            return "Success!";
+		case CL_DEVICE_NOT_FOUND:                   return "Device not found.";
+		case CL_DEVICE_NOT_AVAILABLE:               return "Device not available";
+		case CL_COMPILER_NOT_AVAILABLE:             return "Compiler not available";
+		case CL_MEM_OBJECT_ALLOCATION_FAILURE:      return "Memory object allocation failure";
+		case CL_OUT_OF_RESOURCES:                   return "Out of resources";
+		case CL_OUT_OF_HOST_MEMORY:                 return "Out of host memory";
+		case CL_PROFILING_INFO_NOT_AVAILABLE:       return "Profiling information not available";
+		case CL_MEM_COPY_OVERLAP:                   return "Memory copy overlap";
+		case CL_IMAGE_FORMAT_MISMATCH:              return "Image format mismatch";
+		case CL_IMAGE_FORMAT_NOT_SUPPORTED:         return "Image format not supported";
+		case CL_BUILD_PROGRAM_FAILURE:              return "Program build failure";
+		case CL_MAP_FAILURE:                        return "Map failure";
+		case CL_INVALID_VALUE:                      return "Invalid value";
+		case CL_INVALID_DEVICE_TYPE:                return "Invalid device type";
+		case CL_INVALID_PLATFORM:                   return "Invalid platform";
+		case CL_INVALID_DEVICE:                     return "Invalid device";
+		case CL_INVALID_CONTEXT:                    return "Invalid context";
+		case CL_INVALID_QUEUE_PROPERTIES:           return "Invalid queue properties";
+		case CL_INVALID_COMMAND_QUEUE:              return "Invalid command queue";
+		case CL_INVALID_HOST_PTR:                   return "Invalid host pointer";
+		case CL_INVALID_MEM_OBJECT:                 return "Invalid memory object";
+		case CL_INVALID_IMAGE_FORMAT_DESCRIPTOR:    return "Invalid image format descriptor";
+		case CL_INVALID_IMAGE_SIZE:                 return "Invalid image size";
+		case CL_INVALID_SAMPLER:                    return "Invalid sampler";
+		case CL_INVALID_BINARY:                     return "Invalid binary";
+		case CL_INVALID_BUILD_OPTIONS:              return "Invalid build options";
+		case CL_INVALID_PROGRAM:                    return "Invalid program";
+		case CL_INVALID_PROGRAM_EXECUTABLE:         return "Invalid program executable";
+		case CL_INVALID_KERNEL_NAME:                return "Invalid kernel name";
+		case CL_INVALID_KERNEL_DEFINITION:          return "Invalid kernel definition";
+		case CL_INVALID_KERNEL:                     return "Invalid kernel";
+		case CL_INVALID_ARG_INDEX:                  return "Invalid argument index";
+		case CL_INVALID_ARG_VALUE:                  return "Invalid argument value";
+		case CL_INVALID_ARG_SIZE:                   return "Invalid argument size";
+		case CL_INVALID_KERNEL_ARGS:                return "Invalid kernel arguments";
+		case CL_INVALID_WORK_DIMENSION:             return "Invalid work dimension";
+		case CL_INVALID_WORK_GROUP_SIZE:            return "Invalid work group size";
+		case CL_INVALID_WORK_ITEM_SIZE:             return "Invalid work item size";
+		case CL_INVALID_GLOBAL_OFFSET:              return "Invalid global offset";
+		case CL_INVALID_EVENT_WAIT_LIST:            return "Invalid event wait list";
+		case CL_INVALID_EVENT:                      return "Invalid event";
+		case CL_INVALID_OPERATION:                  return "Invalid operation";
+		case CL_INVALID_GL_OBJECT:                  return "Invalid OpenGL object";
+		case CL_INVALID_BUFFER_SIZE:                return "Invalid buffer size";
+		case CL_INVALID_MIP_LEVEL:                  return "Invalid mip-map level";
+		default: return "Unknown";
+	}
+}
+
+static void windDown(){
+	endwin();
+	exit(0);
+}
+
+static void clNotify(const char *errinfo, const void *private_info, 
+			  size_t cb, void *user_data){
+	clear();
+	printf("\nReceived OpenCL Notification: %s\n", errinfo);
+	refresh();
+}
+
+static inline int totalRounds(){
+	unsigned int rounds = 0;
+	unsigned int z = numDevices * QUEUE_LOAD;
+	while (z--)
+		rounds += userDatas[z].rounds;
+
+	return rounds;
+}
+
+static void skipline(FILE* f){
+	int c;
+	do
+	  c = fgetc(f);
+	while (c != '\n');
+}
+
+static void file_put_contents(const char *filepath, const char *data)
+{
+	FILE *fp = fopen(filepath, "w");
+	fputs(data, fp);
+	fclose(fp);
+}
+
+static void generateKernelSourceCode(){
+	
+	sprintf(clKernelSourceCode, 
+		"\x23pragma OPENCL EXTENSION cl_khr_int64_base_atomics : enable\n"
+		"\x23pragma OPENCL EXTENSION cl_khr_int64_extended_atomics : enable\n"
+		"// tickersCount: %1$zu \n"
+		"// localMutationBlockSize: %5$u \n"
+		MULTI_LINE_STRING(
+
+		typedef struct species_parms{
+			float multipliers[%3$u];
+			int exponents[%4$u];
+		} species_parms;
+
+		typedef struct fitness_result {
+			float fitness;
+			unsigned int parmsIdx;
+		} fitness_result;
+
+
+
+		__kernel void fitness(
+			__constant const float* tickersData,
+			__global const species_parms* parmsBlock,
+			volatile __global fitness_result* fitnessResult
+		) {
+
+			// const unsigned int mutationOffset = %5$u * get_group_id(0) + get_local_id(0);
+			const species_parms parms = parmsBlock[get_global_id(0)];
+
+			float spent = 0., sold = 0., isHolding = 0.;
+
+			)
+			//"\n\x23pragma unroll\n"
+			MULTI_LINE_STRING(
+			for (unsigned int i = 0; i < %2$u; i += %6$u){
+				if (  parms.multipliers[0]  *  pown((double)tickersData[i+2],  parms.exponents[0])
+					+ parms.multipliers[1]  *  pown((double)tickersData[i+3],  parms.exponents[1])
+					+ parms.multipliers[2]  *  pown((double)tickersData[i+4],  parms.exponents[2])
+					+ parms.multipliers[3]  *  pown((double)tickersData[i+5],  parms.exponents[3])
+					+ parms.multipliers[4]  *  pown((double)tickersData[i+6],  parms.exponents[4])
+					+ parms.multipliers[5]  *  pown((double)tickersData[i+7],  parms.exponents[5])
+					> 0.){
+					if (!isHolding){
+						spent += (isHolding = tickersData[i+1]);
+					}
+				}else if (isHolding){
+					sold += tickersData[i+1];
+					isHolding = 0.;
+				}
+			}
+			const float fitness = (spent > isHolding) ? sold / (spent - isHolding) : 1.;
+			fitness_result curBest = *fitnessResult;
+			if (fitness > curBest.fitness){
+				const fitness_result newBest = (fitness_result){
+					fitness, get_global_id(0)
+				};
+				do {
+					ulong old = atom_cmpxchg(
+						(volatile __global ulong*)fitnessResult, 
+						*((ulong*)&curBest), 
+						*((ulong*)&newBest)
+					);
+					if (*((ulong*)&curBest) == *((ulong*)&old)) break;
+
+					curBest = *((fitness_result*)&old);
+				} while(fitness > curBest.fitness);
+			}
+		}
+	), tickersCount, tickerDatapointCount * FLOATS_PER_DATAPOINT, NUM_MULTIPLIERS, NUM_EXPONENTS, localMutationBlockSize, FLOATS_PER_DATAPOINT);
+	file_put_contents(KERNEL_FILE_PATH, clKernelSourceCode);
+}
+
+static void readSettings(){
+	fSettings = fopen (SETTINGS_FILE , "r+");
+	if (!fSettings){
+		printf("No previous settings were found, using default parameters.\n");
+		fSettings = fopen(SETTINGS_FILE, "w+");
+		if (!fSettings){
+			printf("Could not create settings file, %s!", SETTINGS_FILE);
+			windDown();
+		}
+		return;
+	}
+	fseek(fSettings, 0, SEEK_END);
+	if (!ftell(fSettings)) return;
+	fseek(fSettings, 0, SEEK_SET);
+
+	skipline(fSettings);
+	fscanf(fSettings, REPEAT_TEXT(NUM_MULTIPLIERS, "%e ") "\n", 
+		BOOST_PP_ENUM_BINARY_PARAMS(NUM_MULTIPLIERS, &curParms.multipliers[BOOST_PP_INC_,-1]BOOST_PP_INTERCEPT)
+	);
+	skipline(fSettings);
+	fscanf(fSettings, REPEAT_TEXT(NUM_EXPONENTS, "%i ") "\n", 
+		BOOST_PP_ENUM_BINARY_PARAMS(NUM_EXPONENTS, &curParms.exponents[BOOST_PP_INC_,-1]BOOST_PP_INTERCEPT)
+	);
+}
+
+static inline void writeSettings(){
+	if (curFitness == lastWrittenFitness) return;
+
+	rewind(fSettings);
+	ftruncate(fileno(fSettings), fprintf(fSettings, 
+		"Multipliers:\n"
+		REPEAT_BINARY_TEXT_FROM_TO(1, BOOST_PP_INC(NUM_MULTIPLIERS), "%", "$e ") "\n"
+		"Exponents:\n"
+		REPEAT_BINARY_TEXT_FROM_TO(BOOST_PP_INC(NUM_MULTIPLIERS),BOOST_PP_INC(NUM_PARMS), "%", "$i ") "\n"
+		"Fitness:\n%" BOOST_PP_STRINGIZE(BOOST_PP_INC(NUM_PARMS)) "$f\n"
+		"Mathematica Format: Riffle[Internal`StringToDouble /@ {"
+		REPEAT_BINARY_TEXT_FROM_TO(1,BOOST_PP_INC(NUM_MULTIPLIERS), "\"%", "$e\",")
+		"}[[;;-2]],{"
+		REPEAT_BINARY_TEXT_FROM_TO(BOOST_PP_INC(NUM_MULTIPLIERS),BOOST_PP_INC(NUM_PARMS), "%", "$i,")
+		"}[[;;-2]]]",
+		BOOST_PP_ENUM_BINARY_PARAMS(NUM_MULTIPLIERS, curParms.multipliers[BOOST_PP_INC_,-1]BOOST_PP_INTERCEPT),
+		BOOST_PP_ENUM_BINARY_PARAMS(NUM_EXPONENTS, curParms.exponents[BOOST_PP_INC_,-1]BOOST_PP_INTERCEPT),
+		lastWrittenFitness = curFitness
+	));
+}
+
+static void readTickersInfo(){
+	FILE* f = fopen (TICKERSINFO_FILE , "r");
+	if (!f){
+		printf("Could not read %s!", TICKERSINFO_FILE);
+		windDown();
+	}
+	skipline(f);
+	fscanf(f, "%zu\n", &tickersCount);
+	skipline(f);
+	fscanf(f, "%u\n", &tickerDatapointCount);
+	// skipline(f);
+	// fscanf(f, "%u\n", &floatsPerDatapoint);
+	fclose(f);
+
+	tickersDataSize = 
+		  tickersCount 
+		* tickerDatapointCount 
+		* FLOATS_PER_DATAPOINT
+		* sizeof(float);
+
+	localMutationBlockSize = MAX_WORK_SIZE / tickersCount;
+	globalMutationBlockSize = localMutationBlockSize * GLOBAL_WORK_ITEMS;
+
+	localWorkDimensions[0] = localMutationBlockSize;
+	globalWorkDimensions[0] = globalMutationBlockSize;
+
+	printf("Using global dimensions [%zu]\n", globalWorkDimensions[0]);
+	printf("Using local dimensions [%zu]\n", localWorkDimensions[0]);
+	
+	// // globalWorkDimensions[1] = localWorkDimensions[1] = tickersCount;
+
+	// printf("Using global dimensions [%zu, %zu]\n", globalWorkDimensions[0], globalWorkDimensions[1]);
+	// printf("Using local dimensions [%zu, %zu]\n", localWorkDimensions[0], localWorkDimensions[1]);
+}
+
+static float* readTickersData(){
+	printf("Reading in %s for %zu tickers...\n\n", TICKERSDATA_FILE, tickersCount);
+	float* tickersData = malloc(tickersDataSize);
+	FILE* f = fopen(TICKERSDATA_FILE, "rb");
+	if (!f){
+		printf("Could not read %s!", TICKERSDATA_FILE);
+		windDown();
+	}
+	fseek(f, 0, SEEK_END);
+	if (tickersDataSize != ftell(f)){
+		fclose(f);
+		printf("Error! %s should be %u bytes\n",
+			TICKERSDATA_FILE
+			, tickersDataSize);
+		windDown();
+	}
+	fseek(f, 0, SEEK_SET); 
+	fread(tickersData, 1, tickersDataSize, f);
+	fclose(f);
+
+	return tickersData;
+}
+
+
+static inline species_parms mutateParms(species_parms parms){
+	unsigned int parmIndexes[] = {
+		BOOST_PP_ENUM_PARAMS(NUM_PARMS,)
+	};
+	unsigned int parmsToChange = NUM_PARMS - (int) sqrt(RANDINT(NUM_PARMS*NUM_PARMS));
+
+
+	unsigned int z; 
+	unsigned int* randParm;
+
+	for (z = 0; z < parmsToChange; ++z){
+		randParm = &parmIndexes[NUM_PARMS - 1 - RANDINT(NUM_PARMS - z)];
+		if (*randParm < NUM_MULTIPLIERS)
+			arc4random_buf(&parms.multipliers[*randParm], sizeof(parms.multipliers[0]));
+		else
+			parms.exponents[*randParm - NUM_MULTIPLIERS] = RANDINT(256) - 127;
+		*randParm = parmIndexes[z];
+	}
+
+
+	return parms;
+}
+
+static inline void enqueueJob(user_data* userData){
+
+	species_parms* parmsBlock = userData->parmsBlock;
+	cl_kernel clKernel = userData->clKernel;
+	cl_mem parmsMem = userData->parmsMem;
+	cl_command_queue clCommandQueue = userData->clCommandQueue;
+	cl_event clEvent;
+
+	unsigned int* rounds = &userData->rounds;
+	fitness_result* fitnessResult = userData->fitnessResult;
+	
+	for(;;){
+		unsigned int i = globalMutationBlockSize;
+		while (i--) 
+			parmsBlock[i] = mutateParms(curParms);
+
+		clSetKernelArg(clKernel, 1, sizeof(parmsMem), &parmsMem);
+
+		clEnqueueNDRangeKernel(
+			clCommandQueue, clKernel, sizeof(globalWorkDimensions) / sizeof(size_t), 0, 
+			globalWorkDimensions, localWorkDimensions, 
+			0, 0, &clEvent);
+
+		clFlush(clCommandQueue);
+		clWaitForEvents(1, &clEvent);
+
+		*rounds += globalMutationBlockSize;
+
+		if (fitnessResult->fitness > curFitness){
+			curFitness = fitnessResult->fitness;
+			curParms = parmsBlock[fitnessResult->parmsIdx];
+			unsigned int z = numDevices;
+			while (z--)
+				deviceDatas[z].fitnessResult->fitness = curFitness;
+		}
+	}
+}
+
+static void enqueueCurrentSpecies(){
+	user_data* userData = &userDatas[0];
+
+	species_parms* parmsBlock = userData->parmsBlock;
+	unsigned int i = globalMutationBlockSize;
+	while (i--) 
+		parmsBlock[i] = curParms;
+	
+	clSetKernelArg(userData->clKernel, 1, sizeof(userData->parmsMem), &userData->parmsMem);
+
+	const cl_int errcode_ret = clEnqueueNDRangeKernel(
+		userData->clCommandQueue, userData->clKernel, sizeof(globalWorkDimensions) / sizeof(size_t), 0, 
+		globalWorkDimensions, localWorkDimensions, 
+		0, 0, 0);
+
+	if (errcode_ret != CL_SUCCESS){
+		printf("Error enqueueing kernel: %s\n", clErrorStr(errcode_ret));
+		windDown();
+	}
+
+	clFinish(userData->clCommandQueue);
+
+	curFitness = userData->fitnessResult->fitness;
+
+	unsigned int z = numDevices;
+	while (z--)
+		deviceDatas[z].fitnessResult->fitness = curFitness;
+}
+
+static void strapQueue(device_data* deviceData, const unsigned int queueNum){
+	
+	user_data* userData = &userDatas[deviceData->deviceNum * QUEUE_LOAD + queueNum];
+	userData->rounds = 0;
+
+	cl_int errcode_ret;
+
+
+	userData->clCommandQueue = deviceData->clCommandQueue;
+	userData->clKernel = deviceData->clKernel;
+	userData->fitnessResult = deviceData->fitnessResult;
+
+
+
+	userData->parmsMem = clCreateBuffer(
+		deviceData->clContext, CL_MEM_READ_ONLY | CL_MEM_ALLOC_HOST_PTR, 
+		sizeof(species_parms[globalMutationBlockSize]),
+		0,
+		&errcode_ret
+	);
+
+	if (errcode_ret != CL_SUCCESS){
+		printf("Error creating OpenCL parms mem buffer (%s)\n", clErrorStr(errcode_ret));
+		windDown();
+	}
+
+	userData->parmsBlock = clEnqueueMapBuffer(
+		userData->clCommandQueue, userData->parmsMem, CL_TRUE, CL_MAP_WRITE, 
+		0, sizeof(species_parms[globalMutationBlockSize]),
+		0, 0, 0, 
+		&errcode_ret
+	);
+
+	if (errcode_ret != CL_SUCCESS){
+		printf("Error mapping OpenCL parms mem buffer (%s)\n", clErrorStr(errcode_ret));
+		windDown();
+	}
+}
+
+static device_data bootstrapDevice(
+	const cl_platform_id clPlatformID, 
+	const cl_device_id clDeviceID,
+	const unsigned int deviceNum,
+	float* tickersData
+){
+	size_t infoValues[3];
+	clGetDeviceInfo(
+		clDeviceID, CL_DEVICE_MAX_WORK_GROUP_SIZE, 
+		sizeof(size_t), &infoValues, 0
+	);
+	printf("CL_DEVICE_MAX_WORK_GROUP_SIZE=%zu for device %u\n", infoValues[0], deviceNum);
+
+	clGetDeviceInfo(
+		clDeviceID, CL_DEVICE_MAX_WORK_ITEM_SIZES, 
+		sizeof(infoValues), &infoValues, 0
+	);
+	printf("CL_DEVICE_MAX_WORK_ITEM_SIZES=(%zu,%zu,%zu) for device %u\n", infoValues[0], infoValues[1], infoValues[2], deviceNum);
+
+
+	cl_uint infoValue;
+	clGetDeviceInfo(
+		clDeviceID, CL_DEVICE_MAX_WORK_ITEM_DIMENSIONS, 
+		sizeof(infoValue), &infoValue, 0
+	);
+	printf("CL_DEVICE_MAX_WORK_ITEM_DIMENSIONS=%u for device %u\n", infoValue, deviceNum);
+
+	clGetDeviceInfo(
+		clDeviceID, CL_DEVICE_MAX_COMPUTE_UNITS, 
+		sizeof(infoValue), &infoValue, 0
+	);
+	printf("CL_DEVICE_MAX_COMPUTE_UNITS=%u for device %u\n", infoValue, deviceNum);
+
+	clGetDeviceInfo(
+		clDeviceID, CL_DEVICE_MAX_CLOCK_FREQUENCY, 
+		sizeof(infoValue), &infoValue, 0
+	);
+	printf("CL_DEVICE_MAX_CLOCK_FREQUENCY=%u for device %u\n\n", infoValue, deviceNum);
+
+	char deviceExtensions[1028];
+	clGetDeviceInfo(
+		clDeviceID, CL_DEVICE_EXTENSIONS, 
+		sizeof(deviceExtensions), &deviceExtensions, 0
+	);
+	printf("CL_DEVICE_EXTENSIONS=%s for device %u\n", deviceExtensions, deviceNum);
+
+
+
+
+	device_data deviceData;
+
+	deviceData.deviceNum = deviceNum;
+
+	const cl_context_properties clContextProperties[] = {
+		CL_CONTEXT_PLATFORM, (cl_context_properties)clPlatformID
+	, 0};
+
+	cl_int errcode_ret;
+	deviceData.clContext = clCreateContext(
+		clContextProperties, 1, &clDeviceID, 
+		&clNotify, 0, &errcode_ret
+	);
+	if (errcode_ret == CL_SUCCESS)
+		printf("Sucessfully created OpenCL context for device %u!\n", deviceNum);
+	else{
+		printf("Error creating OpenCL Context (%s)\n", clErrorStr(errcode_ret));
+		windDown();
+	}
+
+	const char* sourceCodeStrings = clKernelSourceCode;
+
+	deviceData.clProgram = 
+		clCreateProgramWithSource(
+			deviceData.clContext, 1, &sourceCodeStrings, 0, &errcode_ret
+		);
+	if (errcode_ret == CL_SUCCESS)
+		printf("Successfully created OpenCL program for device %u!\n", deviceNum);
+	else{
+		printf("Error creating OpenCL program from kernel source(%s)\n", clErrorStr(errcode_ret));
+		windDown();
+	}
+
+	errcode_ret = clBuildProgram(deviceData.clProgram, 1, &clDeviceID, CL_BUILD_OPTIONS, 0, 0);
+	if (errcode_ret == CL_SUCCESS)
+		printf("Successfully built the OpenCL program for device %u!\n", deviceNum);
+	else{
+		printf("Error building OpenCL program (%s) \n", clErrorStr(errcode_ret));
+		size_t blSize;
+		clGetProgramBuildInfo(
+			deviceData.clProgram, clDeviceID, CL_PROGRAM_BUILD_LOG, 0, 0, &blSize
+		);
+		char buildLog[blSize];
+		clGetProgramBuildInfo(
+			deviceData.clProgram, clDeviceID, CL_PROGRAM_BUILD_LOG, sizeof(buildLog), buildLog, 0
+		);
+		printf("\n%s\n", buildLog);
+		windDown();
+	}
+
+	deviceData.tickersDataMem = clCreateBuffer(
+		deviceData.clContext, CL_MEM_READ_ONLY | CL_MEM_COPY_HOST_PTR, 
+		tickersDataSize, 
+		tickersData,
+		&errcode_ret
+	);
+
+	if (errcode_ret == CL_SUCCESS)
+		printf("Successfully created tickersData OpenCL memory buffer for device %u!\n", deviceNum);
+	else{
+		printf("Error creating OpenCL tickersData mem buffer (%s)\n", clErrorStr(errcode_ret));
+		windDown();
+	}
+
+	deviceData.clCommandQueue = clCreateCommandQueue(
+		deviceData.clContext, clDeviceID, CL_QUEUE_FLAGS, &errcode_ret
+	);
+
+	if (errcode_ret != CL_SUCCESS){
+		printf("Error creating OpenCL command queue (%s)\n", clErrorStr(errcode_ret));
+		windDown();
+	}
+
+	deviceData.clKernel = clCreateKernel(deviceData.clProgram, "fitness", &errcode_ret);
+	if (errcode_ret != CL_SUCCESS){
+		printf("Error creating the OpenCL kernel (%s)\n", clErrorStr(errcode_ret));
+		windDown();
+	}
+
+	cl_mem fitnessMem = clCreateBuffer(
+		deviceData.clContext, CL_MEM_READ_WRITE | CL_MEM_ALLOC_HOST_PTR, 
+		sizeof(fitness_result),
+		0,
+		&errcode_ret
+	);
+
+	if (errcode_ret != CL_SUCCESS){
+		printf("Error creating OpenCL fitness mem buffer (%s)\n", clErrorStr(errcode_ret));
+		windDown();
+	}
+
+
+	deviceData.fitnessResult = clEnqueueMapBuffer(
+		deviceData.clCommandQueue, fitnessMem, CL_TRUE, CL_MAP_READ | CL_MAP_WRITE, 
+		0, sizeof(fitness_result),
+		0, 0, 0, 
+		&errcode_ret
+	);
+
+	deviceData.fitnessResult->fitness = 0.;
+
+	if (errcode_ret != CL_SUCCESS){
+		printf("Error mapping OpenCL fitness mem buffer (%s)\n", clErrorStr(errcode_ret));
+		windDown();
+	}
+
+	clSetKernelArg(deviceData.clKernel, 0, sizeof(deviceData.tickersDataMem), &deviceData.tickersDataMem);
+	clSetKernelArg(deviceData.clKernel, 2, sizeof(fitnessMem), &fitnessMem);
+
+	return deviceData;
+}
+
+static void initCurses(){
+	signal(SIGINT, windDown);
+	initscr();
+	start_color();
+	use_default_colors();
+	init_pair(1, COLOR_RED, -1);
+	init_pair(2, COLOR_GREEN, -1);
+	init_pair(3, COLOR_BLUE, -1);
+	init_pair(4, COLOR_YELLOW, -1);
+	init_pair(5, COLOR_MAGENTA, -1);
+	init_pair(6, COLOR_CYAN, -1);
+	init_pair(7, COLOR_WHITE, -1);
+}
+
+static void bootstrapCL(float* tickersData){
+	unsigned int numPlatforms;
+	clGetPlatformIDs(0,0,&numPlatforms);
+	printf("Detecting OpenCL Platforms & Devices...\n%u OpenCL platform(s).\n", numPlatforms);
+
+	cl_platform_id clPlatformID;
+	clGetPlatformIDs(1, &clPlatformID, 0);
+
+	clGetDeviceIDs(clPlatformID, CL_DEVICE_TYPE_ALL, 0, 0, &numDevices);
+	printf("%u OpenCL device(s) total.\n", numDevices);
+
+
+	clGetDeviceIDs(clPlatformID, CL_DEVICE_TYPE_CPU, 0, 0, &numDevices);
+	printf("%u OpenCL CPU device(s).\n", numDevices);
+
+	clGetDeviceIDs(clPlatformID, CL_DEVICE_TYPE_GPU, 0, 0, &numDevices);
+	printf("%u OpenCL GPU device(s).\n", numDevices);
+
+	clGetDeviceIDs(clPlatformID, MAIN_DEVICE_TYPE, 0, 0, &numDevices);
+
+	printf("Using the %u %s devices.. starting at device #%u\n\n", numDevices, MAIN_DEVICE_TYPE == CL_DEVICE_TYPE_GPU ? "GPU" : "CPU", INITIAL_DEVICE_ID_OFFSET);
+
+	cl_device_id clDeviceIDsOrig[numDevices];
+	clGetDeviceIDs(clPlatformID, MAIN_DEVICE_TYPE, numDevices, clDeviceIDsOrig, 0);
+
+	cl_device_id* clDeviceIDs = &clDeviceIDsOrig[INITIAL_DEVICE_ID_OFFSET];
+	numDevices -= INITIAL_DEVICE_ID_OFFSET;
+
+	userDatas = malloc(sizeof(user_data[numDevices * QUEUE_LOAD]));
+
+	unsigned int i = numDevices;
+	deviceDatas = malloc(sizeof(device_data[numDevices]));
+
+	while (i--)
+		deviceDatas[i] = bootstrapDevice(clPlatformID, clDeviceIDs[i], i, tickersData);
+
+
+	printf("\nLaunching kernels, %u work-groups each!\n", GLOBAL_WORK_ITEMS);
+	i = numDevices;
+	unsigned int z;
+	while (i--){
+		z = QUEUE_LOAD;
+		while (z--){
+			printf("Bootstrapping job %u/%u for device #%u...\n", z+1,QUEUE_LOAD,i);
+			strapQueue(&deviceDatas[i], z);
+		}
+	}
+
+	enqueueCurrentSpecies();
+	lastWrittenFitness = curFitness;
+
+
+	pthread_t thread;
+
+	i = numDevices;
+	while (i--){
+		z = QUEUE_LOAD;
+		while (z--){
+			printf("Enqueueing job %u/%u for device #%u...\n", z+1,QUEUE_LOAD,i);
+			pthread_create(&thread, 0, enqueueJob, (void*) &userDatas[i * QUEUE_LOAD + z]);
+		}
+	}
+
+
+	free(tickersData);
+}
+
+// #define RANDOM_COUNT 100000000
+// int main(void) {
+//     seedRandom();
+
+//     int rand_count[] = {0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0};
+//     int rand_pick;
+//     int i;
+
+//     // run number of experiments
+//     for(i = 0; i < RANDOM_COUNT; i++) {
+//         rand_pick = NUM_PARMS - 1 - (int) sqrt(RANDINT(NUM_PARMS*NUM_PARMS));
+//         rand_count[rand_pick]++;
+//     }
+
+//     for(i = 0; i <= 11; i++) {
+//         printf("%d => %f %%\n", i, rand_count[i] /((float) RANDOM_COUNT));
+//     }   
+// }  
+// 
+// 
+static double startTime;
+
+#ifdef __APPLE__
+static double orwl_timebase = 1.E-9;
+static inline double curtime() {
+ return mach_absolute_time() * orwl_timebase;
+}
+static void init_time(){
+	mach_timebase_info_data_t tb = { 0 };
+	mach_timebase_info(&tb);
+	orwl_timebase *= tb.numer;
+	orwl_timebase /= tb.denom;
+	startTime = curtime();
+}
+#else
+static inline double curtime(){
+	struct timespec time;
+	clock_gettime(CLOCK_REALTIME, &time);
+	return (time.tv_sec + time.tv_nsec * 1.E-9) ;
+}
+static void init_time(){
+	startTime = curtime();
+}
+#endif
+
+static inline void printStatus(){
+	clear();
+	double runningTime = (curtime() - startTime);
+	attron(COLOR_PAIR(1));
+	attron(A_BOLD);
+	addstr(
+		"\n"
+		"            -- OpenCL Evolution --\n"
+		"\n"
+	);
+	attron(COLOR_PAIR(2));            
+	addstr("            Rounds ");
+	attroff(A_BOLD);
+	unsigned int rounds = totalRounds();
+	printw("%'16u \n",
+		rounds
+	);
+	attron(COLOR_PAIR(1));
+	attron(A_BOLD);
+	addstr(
+		"    Rounds Per Sec "
+	);
+	attroff(A_BOLD);
+	printw("%'16f / sec \n",
+		rounds  / runningTime
+	);
+	attron(COLOR_PAIR(4));
+	attron(A_BOLD);
+	addstr(
+		"      Running Time "
+
+	);
+	attroff(A_BOLD);
+	printw("%'16f sec \n",
+		runningTime
+
+	);
+	attron(COLOR_PAIR(5));
+	attron(A_BOLD);
+	addstr("           Fitness ");
+	attroff(A_BOLD);
+	attron(A_STANDOUT);
+	printw("%'16f \n\n",
+		curFitness
+	);
+	attroff(A_STANDOUT);
+	attron(COLOR_PAIR(6));
+	attron(A_BOLD);
+	addstr("                   Multipliers\n               ==================\n"
+	);
+	attroff(A_BOLD);
+	printw(
+		REPEAT_TEXT(NUM_MULTIPLIERS,"                %16e\n") "\n\n",
+		BOOST_PP_ENUM_BINARY_PARAMS(NUM_MULTIPLIERS, curParms.multipliers[BOOST_PP_INC_,-1]BOOST_PP_INTERCEPT)
+	);
+	attron(COLOR_PAIR(7));
+	attron(A_BOLD);
+	addstr(
+		"                    Exponents\n               ==================\n"
+	);
+	attroff(A_BOLD);
+	printw(
+		REPEAT_TEXT(NUM_EXPONENTS,"                %16i\n") "\n\n",
+		BOOST_PP_ENUM_BINARY_PARAMS(NUM_EXPONENTS, curParms.exponents[BOOST_PP_INC_,-1]BOOST_PP_INTERCEPT)
+	);
+	refresh();
+}
+
+
+
+int main(void) {
+	setlocale(LC_ALL, "");
+
+	chdir(getenv("HOME"));
+
+	readSettings();
+
+	printf("\n   OpenCL Evolution v%u\n----------------------------\n", VERSION);
+
+	readTickersInfo();
+
+	generateKernelSourceCode();
+
+	bootstrapCL(readTickersData());
+
+	initCurses();
+
+	init_time();
+	for (;;){
+		writeSettings();
+		printStatus();
+		sleep(1);
+	}
+
+	return 0;
+}
+
+
+
+
+
+
+
+
