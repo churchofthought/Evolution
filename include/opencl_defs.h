@@ -9,14 +9,17 @@
 
 #define NUM_MULTIPLIERS 8
 #define NUM_EXPONENTS 0
-#define NUM_PARMS BOOST_PP_INC(BOOST_PP_ADD(NUM_MULTIPLIERS, NUM_EXPONENTS))
+// #define NUM_PARMS BOOST_PP_INC(BOOST_PP_ADD(NUM_MULTIPLIERS, NUM_EXPONENTS))
+#define NUM_PARMS BOOST_PP_ADD(NUM_MULTIPLIERS, NUM_EXPONENTS)
+
+#define MIN_GAIN 1.0
 
 #define PARMS_PER_ROW 4
 
 #ifdef CUDA
 	#define FORCE_LOCAL_THREADS 640
 	#define GLOBAL_WORK_MULTIPLE 1
-	#define NVCC_CMD "/usr/local/cuda/bin/nvcc -I ."INC_PATH" -cubin "KERNEL_FILE_PATH" -odir /tmp/ -arch sm_35 -O3 -Xptxas -v 2>&1"
+	#define NVCC_CMD "/usr/local/cuda-6.5/bin/nvcc -I ."INC_PATH" -cubin "KERNEL_FILE_PATH" -odir /tmp/ -arch sm_35 -O3 -Xptxas -v 2>&1"
 	#define CUDA_COMPILE_BIN
 	#define CUDA_CTX_FLAGS 0
 	#define CUDA_STREAM_FLAGS 0
@@ -38,7 +41,7 @@
 typedef struct species_parms{
 	float multipliers[NUM_MULTIPLIERS];
 	int exponents[NUM_EXPONENTS];
-	float minGain;
+	// float minGain;
 } species_parms;
 
 typedef struct fitness_result {

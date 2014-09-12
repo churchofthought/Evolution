@@ -1,5 +1,5 @@
 // rm /tmp/opencl_evolution;sudo killall -9 opencl_evolution;gcc opencl_evolution.c -std=c99 -framework OpenCL -lncurses -lcdk -Wall -fast -o /tmp/opencl_evolution; /tmp/opencl_evolution
-// rm /tmp/opencl_evolution;sudo killall -9 opencl_evolution;gcc opencl_evolution.c -std=c99 -L/usr/local/cuda/lib64 -I/usr/local/cuda/include -Iinclude -lcuda -lOpenCL -lncurses -lcdk -lrt -Wall -Ofast -o /tmp/opencl_evolution; /tmp/opencl_evolution
+// rm /tmp/opencl_evolution;sudo killall -9 opencl_evolution;gcc opencl_evolution.c -std=c99 -L/usr/local/cuda-6.5/lib64 -I/usr/local/cuda-6.5/include -Iinclude -lcuda -lOpenCL -lncurses -lcdk -lrt -Wall -Ofast -o /tmp/opencl_evolution; /tmp/opencl_evolution
 #define EVO_VERSION 7.11
 #define _GNU_SOURCE 1
 
@@ -111,20 +111,20 @@ static void init_time(){
 
 
 
+#define BASE_DIR "Desktop/Evolution/"
 
 
 
+#define INC_PATH BASE_DIR "include"
 
-#define INC_PATH "/Dropbox/Evolution/include"
-
-#define SETTINGS_FILE    "Dropbox/Evolution/opencl_parms.txt"
+#define SETTINGS_FILE BASE_DIR "opencl_parms.txt"
 #define KERNEL_FILE_PATH "/tmp/opencl_kernel.cu"
-#define KERNEL_SRC_PATH "Dropbox/Evolution/opencl_kernel.c"
-#define TICKERSINFO_FILE "Dropbox/Evolution/tickersInfo.txt"
-#define TICKERS_FILE "Dropbox/Evolution/tickers.txt"
-#define TICKERSDATA_FILE "Dropbox/Evolution/tickersData.dat"
+#define KERNEL_SRC_PATH BASE_DIR "opencl_kernel.c"
+#define TICKERSINFO_FILE BASE_DIR "tickersInfo.txt"
+#define TICKERS_FILE BASE_DIR "tickers.txt"
+#define TICKERSDATA_FILE BASE_DIR "tickersData.dat"
 
-#define DEBUG_FILE    "Dropbox/Evolution/opencl_debug.txt"
+#define DEBUG_FILE    BASE_DIR "opencl_debug.txt"
 
 // #define MULTI_LINE_STRING(...) #__VA_ARGS__
 
@@ -561,7 +561,7 @@ static void fillDefaultParameters(){
 	for (z = NUM_EXPONENTS; z--;)
 		curRes.parms.exponents[z] = 0;
 
-	curRes.parms.minGain = 0;
+	// curRes.parms.minGain = 0;
 }
 
 static void readSettings(){
@@ -599,13 +599,13 @@ static void readSettings(){
 			windDown();
 		}
 	#endif
-	skipline(fSettings);
-	if (!fscanf(fSettings, "%e \n", 
-		&curRes.parms.minGain
-	)){
-		printf("fscanf failed to read minGain in %s!", __func__);
-		windDown();
-	}
+	// skipline(fSettings);
+	// if (!fscanf(fSettings, "%e \n", 
+	// 	&curRes.parms.minGain
+	// )){
+	// 	printf("fscanf failed to read minGain in %s!", __func__);
+	// 	windDown();
+	// }
 }
 
 static inline void writeSettings(){
@@ -617,20 +617,20 @@ static inline void writeSettings(){
 			"Exponents:\n"
 			REPEAT_TEXT(NUM_EXPONENTS, "%i ") "\n"
 		#endif
-		"MinGain:\n"
-		"%e \n"
-		// "Mathematica Format: Riffle[{"
-		// REPEAT_TEXT(NUM_MULTIPLIERS, "%e, ")
-		// "}[[;;-2]],{"
-		// REPEAT_TEXT(NUM_EXPONENTS, "%i, ")
-		// "}[[;;-2]]]\n"
+		// "MinGain:\n"
+		// "%e \n"
+		"Mathematica Format: Riffle[{"
+		REPEAT_TEXT(NUM_MULTIPLIERS, "%e, ")
+		"}[[;;-2]],{"
+		REPEAT_TEXT(NUM_EXPONENTS, "%i, ")
+		"}[[;;-2]]]\n"
 		"Fitness:\n%f\n"
 		,
 		BOOST_PP_ENUM_BINARY_PARAMS(NUM_MULTIPLIERS, curRes.parms.multipliers[BOOST_PP_INC_,-1]BOOST_PP_INTERCEPT),
 		#if NUM_EXPONENTS > 0
 			BOOST_PP_ENUM_BINARY_PARAMS(NUM_EXPONENTS, curRes.parms.exponents[BOOST_PP_INC_,-1]BOOST_PP_INTERCEPT),
 		#endif
-		curRes.parms.minGain,
+		// curRes.parms.minGain,
 		// BOOST_PP_ENUM_BINARY_PARAMS(NUM_MULTIPLIERS, curRes.parms.multipliers[BOOST_PP_INC_,-1]BOOST_PP_INTERCEPT),
 		// #if NUM_EXPONENTS > 0
 		// 	BOOST_PP_ENUM_BINARY_PARAMS(NUM_EXPONENTS, curRes.parms.exponents[BOOST_PP_INC_,-1]BOOST_PP_INTERCEPT),
@@ -1683,16 +1683,16 @@ static inline void printStatus(){
 		);
 	#endif
 
-	attron(COLOR_PAIR(7));
-	attron(A_BOLD);
-	addstr(
-		"                     MinGain\n               ==================\n"
-	);
-	attroff(A_BOLD);
-	printw(
-		"                %"COMMA_FMT"16e\n",
-		curRes.parms.minGain
-	);	
+	// attron(COLOR_PAIR(7));
+	// attron(A_BOLD);
+	// addstr(
+	// 	"                     MinGain\n               ==================\n"
+	// );
+	// attroff(A_BOLD);
+	// printw(
+	// 	"                %"COMMA_FMT"16e\n",
+	// 	curRes.parms.minGain
+	// );	
 
 	refresh();
 }

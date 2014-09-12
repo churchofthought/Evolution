@@ -104,10 +104,11 @@ static inline void mutateParms(
 		uint* const randParmPtr = &parmIndexes[NUM_PARMS - 1 - RAND_UINT(NUM_PARMS - i, seedVal)];
 		const uint randParm = *randParmPtr;
 		
-		if (randParm < NUM_MULTIPLIERS)
+		// if (randParm < NUM_MULTIPLIERS)
 			parms->multipliers[randParm] = RAND_UFLOAT(seedVal);
-		else
-			parms->minGain = RAND(seedVal) * (1. / 4294967295.);
+		// else
+		// 	parms->minGain = RAND(seedVal) * (1. / 4294967295.);
+			
 		// 	((int*)parms)[randParm] = (int) RAND_UINT(2 * MAX_MULTIPLIER_VAL + 1, seedVal) - MAX_MULTIPLIER_VAL;
 		// else
 		// 	((int*)parms)[randParm]  = (int) RAND_UINT(2 * MAX_EXPONENT_VAL + 1, seedVal) - MAX_EXPONENT_VAL;
@@ -183,7 +184,8 @@ static inline void evalFitness(
 			#ifdef DEBUG
 				debugPoints[i].polyVal = mean;
 			#endif
-			if (mean >= parms->minGain) 
+			// if (mean >= parms->minGain) 
+			if (mean >= MIN_GAIN) 
 			{
 				if (!isHolding){
 					spent += (isHolding = day->price);
