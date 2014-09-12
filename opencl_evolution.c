@@ -111,7 +111,7 @@ static void init_time(){
 
 
 
-#define BASE_DIR "Desktop/Evolution/"
+#define BASE_DIR "/home/evolution/Desktop/Evolution/"
 
 
 
@@ -1407,7 +1407,7 @@ static void bootstrapCL(data_point* tickersData){
 	unsigned int i;
 	unsigned int z;
 
-	#ifndef ALL_DEVICES
+	#if !defined(ALL_DEVICES) || !defined(CUDA)
 	unsigned int t;
 	char** infoList;
 	char* infoStr;

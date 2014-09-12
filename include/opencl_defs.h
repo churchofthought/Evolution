@@ -1,6 +1,6 @@
 #include <boost/preprocessor.hpp>
 
-#define CUDA
+// #define CUDA
 // #define DEBUG
 // #define MUTEX
 #define ALL_DEVICES
@@ -19,13 +19,13 @@
 #ifdef CUDA
 	#define FORCE_LOCAL_THREADS 640
 	#define GLOBAL_WORK_MULTIPLE 1
-	#define NVCC_CMD "/usr/local/cuda-6.5/bin/nvcc -I ."INC_PATH" -cubin "KERNEL_FILE_PATH" -odir /tmp/ -arch sm_35 -O3 -Xptxas -v 2>&1"
+	#define NVCC_CMD "/usr/local/cuda-6.5/bin/nvcc -I "INC_PATH" -cubin "KERNEL_FILE_PATH" -odir /tmp/ -arch sm_35 -O3 -Xptxas -v 2>&1"
 	#define CUDA_COMPILE_BIN
 	#define CUDA_CTX_FLAGS 0
 	#define CUDA_STREAM_FLAGS 0
 #else
 	#define GLOBAL_WORK_MULTIPLE 64
-	#define CL_BUILD_INCLUDES "-I%s"INC_PATH" "
+	#define CL_BUILD_INCLUDES "-I" INC_PATH " "
 	#define CL_BUILD_OPTIONS "-cl-strict-aliasing"
 	#define CL_QUEUE_FLAGS CL_QUEUE_OUT_OF_ORDER_EXEC_MODE_ENABLE
 	#define MAIN_DEVICE_TYPE CL_DEVICE_TYPE_ALL
