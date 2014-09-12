@@ -1,5 +1,5 @@
-// rm /tmp/opencl_evolution;sudo killall -9 opencl_evolution;gcc opencl_evolution.c -std=c99 -framework OpenCL -lncurses -lcdk -Wall -fast -o /tmp/opencl_evolution; /tmp/opencl_evolution
-// rm /tmp/opencl_evolution;sudo killall -9 opencl_evolution;gcc opencl_evolution.c -std=c99 -L/usr/local/cuda-6.5/lib64 -I/usr/local/cuda-6.5/include -Iinclude -lcuda -lOpenCL -lncurses -lcdk -lrt -Wall -Ofast -o /tmp/opencl_evolution; /tmp/opencl_evolution
+// rm /tmp/opencl_evolution;sudo killall -9 opencl_evolution;gcc opencl_evolution.c -std=c99 -framework OpenCL -lncurses -lcdk -pthread -Wall -fast -o /tmp/opencl_evolution; /tmp/opencl_evolution
+// rm /tmp/opencl_evolution;sudo killall -9 opencl_evolution;gcc opencl_evolution.c -std=c99 -L/usr/local/cuda-6.5/lib64 -I/usr/local/cuda-6.5/include -Iinclude -lcuda -lOpenCL -lncurses -lcdk -lrt -pthread -Wall -Ofast -o /tmp/opencl_evolution; /tmp/opencl_evolution
 #define EVO_VERSION 7.11
 #define _GNU_SOURCE 1
 
@@ -270,6 +270,15 @@ ENQUEUEMUTATIONBEGIN
 			case CUDA_ERROR_HOST_MEMORY_NOT_REGISTERED: return "CUDA_ERROR_HOST_MEMORY_NOT_REGISTERED";
 			case CUDA_ERROR_NOT_PERMITTED: return "CUDA_ERROR_NOT_PERMITTED";
 			case CUDA_ERROR_NOT_SUPPORTED: return "CUDA_ERROR_NOT_SUPPORTED";
+			case CUDA_ERROR_INVALID_PTX: return "CUDA_ERROR_INVALID_PTX";
+			case CUDA_ERROR_INVALID_GRAPHICS_CONTEXT: return "CUDA_ERROR_INVALID_GRAPHICS_CONTEXT";
+			case CUDA_ERROR_ILLEGAL_ADDRESS: return "CUDA_ERROR_ILLEGAL_ADDRESS";
+			case CUDA_ERROR_HARDWARE_STACK_ERROR: return "CUDA_ERROR_HARDWARE_STACK_ERROR";
+			case CUDA_ERROR_ILLEGAL_INSTRUCTION: return "CUDA_ERROR_ILLEGAL_INSTRUCTION";
+			case CUDA_ERROR_MISALIGNED_ADDRESS: return "CUDA_ERROR_MISALIGNED_ADDRESS";
+			case CUDA_ERROR_INVALID_ADDRESS_SPACE: return "CUDA_ERROR_INVALID_ADDRESS_SPACE";
+			case CUDA_ERROR_INVALID_PC: return "CUDA_ERROR_INVALID_PC";
+
 		}
 		return "unknown error";
 	}
@@ -631,10 +640,10 @@ static inline void writeSettings(){
 			BOOST_PP_ENUM_BINARY_PARAMS(NUM_EXPONENTS, curRes.parms.exponents[BOOST_PP_INC_,-1]BOOST_PP_INTERCEPT),
 		#endif
 		// curRes.parms.minGain,
-		// BOOST_PP_ENUM_BINARY_PARAMS(NUM_MULTIPLIERS, curRes.parms.multipliers[BOOST_PP_INC_,-1]BOOST_PP_INTERCEPT),
-		// #if NUM_EXPONENTS > 0
-		// 	BOOST_PP_ENUM_BINARY_PARAMS(NUM_EXPONENTS, curRes.parms.exponents[BOOST_PP_INC_,-1]BOOST_PP_INTERCEPT),
-		// #endif
+		BOOST_PP_ENUM_BINARY_PARAMS(NUM_MULTIPLIERS, curRes.parms.multipliers[BOOST_PP_INC_,-1]BOOST_PP_INTERCEPT),
+		#if NUM_EXPONENTS > 0
+			BOOST_PP_ENUM_BINARY_PARAMS(NUM_EXPONENTS, curRes.parms.exponents[BOOST_PP_INC_,-1]BOOST_PP_INTERCEPT),
+		#endif
 		lastWrittenFitness = curRes.fitness
 	))){
 		printf("ftruncate failed in %s", __func__);
@@ -1398,13 +1407,15 @@ static void bootstrapCL(data_point* tickersData){
 	unsigned int i;
 	unsigned int z;
 
-
+	#ifndef ALL_DEVICES
 	unsigned int t;
 	char** infoList;
 	char* infoStr;
 	CDKSELECTION* deviceSelection;
-
 	char* DIALOG_SELECTION_LIST[2];
+	#endif
+
+	
 	user_data* udata;
 
 	#ifdef CUDA
@@ -1583,13 +1594,13 @@ static void bootstrapCL(data_point* tickersData){
 			udata = &userDatas[i];
 			printf(DEVLOG"Enqueueing job %u/%u...\n", i, z+1,QUEUE_LOAD);
 			#ifdef CUDA
-				pthread_create(&thread, NULL, enqueueMutation, udata);
+				pthread_create(&thread, NULL, (void * (*)(void *)) enqueueMutation, udata);
 			#else
 				enqueueMutation(udata);
 			#endif
 		}
 		#ifdef CUDA
-			pthread_create(&thread, NULL, cuEnqueueRead, udata);
+			pthread_create(&thread, NULL, (void * (*)(void *)) cuEnqueueRead, udata);
 		#endif
 		putchar('\n');
 	}
