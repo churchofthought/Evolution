@@ -1,6 +1,6 @@
 #include <boost/preprocessor.hpp>
 
-// #define CUDA
+#define CUDA
 // #define DEBUG
 // #define MUTEX
 #define ALL_DEVICES
@@ -40,7 +40,9 @@
 
 typedef struct species_parms{
 	float multipliers[NUM_MULTIPLIERS];
+	#if NUM_EXPONENTS > 0
 	int exponents[NUM_EXPONENTS];
+	#endif
 	// float minGain;
 } species_parms;
 

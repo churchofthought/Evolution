@@ -95,7 +95,7 @@ static inline void mutateParms(
 
 	const uint parmsToChange = 
 		#ifdef EXPONENTIAL_MUTATION_DISTRIBUTION_POW
-			NUM_PARMS - (uint) native_powr((float)RAND_UINT(BOOST_POW(NUM_PARMS, EXPONENTIAL_MUTATION_DISTRIBUTION_POW), seedVal), 1. / MUTATION_DISTRIBUTION_POW);
+			NUM_PARMS - (uint) native_powr((float)RAND_UINT(BOOST_POW(NUM_PARMS, EXPONENTIAL_MUTATION_DISTRIBUTION_POW), seedVal), 1. / EXPONENTIAL_MUTATION_DISTRIBUTION_POW);
 		#else
 			RAND_UINT(NUM_PARMS + 1, seedVal);
 		#endif
@@ -104,7 +104,7 @@ static inline void mutateParms(
 		uint* const randParmPtr = &parmIndexes[NUM_PARMS - 1 - RAND_UINT(NUM_PARMS - i, seedVal)];
 		const uint randParm = *randParmPtr;
 		
-		// if (randParm < NUM_MULTIPLIERS)
+		if (randParm < NUM_MULTIPLIERS) // nvcc crashes without this if statement...
 			parms->multipliers[randParm] = RAND_UFLOAT(seedVal);
 		// else
 		// 	parms->minGain = RAND(seedVal) * (1. / 4294967295.);
@@ -206,7 +206,7 @@ static inline void evalFitness(
 		fitnessVal = (spent > isHolding 
 						? sold / (spent - isHolding)
 						: 1. 
-					) + buyCount * .01;
+					);// + buyCount * .01;
 	}
 			
 	if (

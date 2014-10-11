@@ -525,7 +525,7 @@ static void exec(char* cmd) {
 	while(!feof(pipe))
 		if(fgets(buffer, 128, pipe) != NULL)
 			fputs(buffer, stdout);
-	putchar('\n');
+	puts("\n\n");
 
 	pclose(pipe);
 	fflush(stdout);
@@ -567,8 +567,10 @@ static void fillDefaultParameters(){
 	for (z = NUM_MULTIPLIERS; z--;)
 		curRes.parms.multipliers[z] = 0;
 	
-	for (z = NUM_EXPONENTS; z--;)
-		curRes.parms.exponents[z] = 0;
+	#if NUM_EXPONENTS > 0
+		for (z = NUM_EXPONENTS; z--;)
+			curRes.parms.exponents[z] = 0;
+	#endif
 
 	// curRes.parms.minGain = 0;
 }
